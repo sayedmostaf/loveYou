@@ -1,30 +1,3 @@
-# #!/usr/bin/env python3
-# # -*- coding: utf-8 -*-
-# """
-# Love in 20 Languages ♥
-# ======================
-
-# A big, glowing heart made ENTIRELY of the words "I love you" in 20 languages.
-# No title, no footer, no frame: just the words, shaped like a heart.
-
-# The heart outline is the classic parametric curve
-
-#         x = 16 sin^3(t)
-#         y = 13 cos t - 5 cos 2t - 2 cos 3t - cos 4t
-
-# and the phrases are packed inside it row by row using their real pixel widths,
-# so every phrase stays complete (smaller type fills the narrow tip). The heart
-# is revealed from the outer edge toward the centre; each phrase fades in,
-# flashes, and settles into a coral -> pink -> violet gradient. A heartbeat pulse
-# and drifting sparkles keep it alive. Hover a phrase to see its language.
-
-# Requirements : Python 3.8+ with tkinter (included in the Windows/macOS
-#                installers; on Debian/Ubuntu: sudo apt install python3-tk).
-#                No other packages.
-# Run          : python love_heart.py
-# Keys         : R replay   F11 / F fullscreen   Esc / Q quit   (Ctrl+C also works)
-# """
-
 import argparse
 import math
 import random
@@ -32,7 +5,7 @@ import signal
 import sys
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 try:
     import tkinter as tk
@@ -42,7 +15,6 @@ except ImportError:
              "(keep 'tcl/tk' ticked). Ubuntu/Debian: sudo apt install python3-tk")
 
 RGB = Tuple[int, int, int]
-Point = Tuple[float, float]
 
 # --------------------------------------------------------------------------- #
 # Content & look
@@ -51,7 +23,7 @@ Point = Tuple[float, float]
 # (language, phrase, is_right_to_left)
 LANGUAGES: List[Tuple[str, str, bool]] = [
     ("English",    "I love you",                       False),
-    ("Arabic",     "أحبك",                              True),
+    ("Arabic",     "ﻚﺒﺣﺃ",                              True),
     ("Spanish",    "Te amo",                           False),
     ("French",     "Je t'aime",                        False),
     ("German",     "Ich liebe dich",                   False),
@@ -66,30 +38,30 @@ LANGUAGES: List[Tuple[str, str, bool]] = [
     ("Japanese",   "愛してる",                          False),
     ("Korean",     "사랑해",                            False),
     ("Bengali",    "আমি তোমাকে ভালোবাসি",               False),
-    ("Urdu",       "میں تم سے محبت کرتا/کرتی ہوں",       True),
+    ("Urdu",       "ﮞﻮﮨ ﯽﺗﺮﮐ/ﺎﺗﺮﮐ ﺖﺒﺤﻣ ﮯﺳ ﻢﺗ ﮟﯿﻣ",       True),
     ("Indonesian", "Aku cinta kamu",                   False),
     ("Swahili",    "Nakupenda",                        False),
-    ("Persian",    "دوستت دارم",                        True),
+    ("Persian",    "ﻡﺭﺍﺩ ﺖﺘﺳﻭﺩ",                        True),
 ]
 
-BG: RGB = (7, 3, 13)                       # near-black with a hint of purple
-AMBIENT: RGB = (120, 16, 74)               # colour of the very soft ambient light
-FLASH: RGB = (255, 240, 248)               # the white-pink flash when a phrase appears
-TIP_BG: RGB = (34, 18, 58)
-TIP_EDGE: RGB = (255, 128, 190)
-# Gradient stops, outer edge -> centre of the heart.
-GRADIENT: List[RGB] = [(255, 80, 96), (255, 70, 140), (255, 100, 190),
-                       (226, 105, 244), (160, 118, 255)]
-GLOW = 0.22                                # strength of the glow behind words
+TITLE = "Love in 20 Languages"
+FINAL_MESSAGE = "One feeling, 20 languages. ♥"
 
-# Timeline (animation seconds; --speed scales real time into this)
-REVEAL_START = 0.6
-REVEAL_DURATION = 8.5
+BG: RGB = (7, 3, 13)                       # near-black with a hint of purple
+FLASH: RGB = (255, 236, 246)               # the white-pink flash when a phrase appears
+HALO: RGB = (110, 14, 66)                  # colour of the soft glow behind the heart
+# Gradient stops, outer edge -> centre of the heart.
+GRADIENT: List[RGB] = [(255, 38, 72), (255, 70, 120), (255, 100, 180),
+                       (236, 105, 238), (170, 110, 255)]
+
+# Timeline (seconds at --speed 1)
+TITLE_CHAR_DELAY = 0.05
+REVEAL_START = 2.3
+REVEAL_DURATION = 8.0
 FADE_IN, SETTLE = 0.45, 0.60               # per phrase
+MESSAGE_FADE = 1.3
 BEAT_PERIOD = 1.7
-BEAT_SCALE = 0.026                         # heart grows by ~2.6 % on each beat
-# Type tiers (fraction of the big size). Smaller tiers are used only where bigger ones cannot fit.
-TIERS = [("big", 1.0), ("small", 0.72), ("tiny", 0.52)]
+BEAT_SCALE = 0.028                         # heart grows by ~3 % on each beat
 
 HEART_UNITS_W, HEART_UNITS_H = 32.0, 29.0  # approx. extent of the curve in its own units
 GLOW_OFFSETS = [(-1, 0), (1, 0), (0, -1), (0, 1)]
@@ -124,41 +96,12 @@ def hexc(c: RGB) -> str:
     return "#%02x%02x%02x" % c
 
 
-def rounded_rect(x1: float, y1: float, x2: float, y2: float, r: float) -> List[float]:
-    """Point list for a smooth rounded rectangle (use with smooth=True)."""
-    return [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2,
-            x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
-
-
-# --------------------------------------------------------------------------- #
-# Backdrop: very soft ambient light (pure Tk, no Pillow) - no visible edges
-# --------------------------------------------------------------------------- #
-
-def make_backdrop(w: int, h: int, seed: int) -> tk.PhotoImage:
-    cell = 6
-    gw, gh = w // cell + 2, h // cell + 2
-    diag = math.hypot(w, h)
-    rng = random.Random(seed)
-    rows = []
-    for j in range(gh):
-        y = j * cell
-        row = []
-        for i in range(gw):
-            x = i * cell
-            d = math.hypot(x - w / 2, y - h * 0.48) / (0.42 * diag)
-            a = 0.20 * math.exp(-2.4 * d * d)
-            noise = rng.random() - 0.5                      # dithering hides banding
-            row.append("#%02x%02x%02x" % tuple(
-                max(0, min(255, int(BG[k] + AMBIENT[k] * a + noise))) for k in range(3)))
-        rows.append(row)
-    small = tk.PhotoImage(width=gw, height=gh)
-    small.put(rows)
-    return small.zoom(cell, cell)
-
-
 # --------------------------------------------------------------------------- #
 # Heart geometry
 # --------------------------------------------------------------------------- #
+
+Point = Tuple[float, float]
+
 
 def heart_curve(samples: int = 480) -> List[Point]:
     """Parametric heart in its own units (y pointing up)."""
@@ -172,12 +115,12 @@ def heart_curve(samples: int = 480) -> List[Point]:
     return pts
 
 
-def fit_heart(width: int, top: float, bottom: float) -> List[Point]:
+def fit_heart(width: int, height: int, top: float, bottom: float) -> List[Point]:
     """Heart polygon in canvas pixels, centred in the band between top and bottom."""
     unit = heart_curve()
     ys = [p[1] for p in unit]
     y_mid = (max(ys) + min(ys)) / 2
-    scale = min(0.94 * width / HEART_UNITS_W, (bottom - top) / HEART_UNITS_H)
+    scale = min(0.90 * width / HEART_UNITS_W, (bottom - top) / HEART_UNITS_H)
     cx, cy = width / 2, (top + bottom) / 2
     return [(cx + x * scale, cy - (y - y_mid) * scale) for x, y in unit]
 
@@ -227,25 +170,23 @@ def distance_to_edge(poly: List[Point], px: float, py: float) -> float:
 class Entry:
     language: str
     text: str
+    rtl: bool
     width: float            # measured pixel width
 
 
 @dataclass
 class Phrase:
-    language: str
     text: str
-    font: str               # "big" or "small"
     x: float                # left edge
     y: float                # vertical centre
     width: float
     color: RGB
     ring: int
     angle: float
-    start: float = 0.0      # reveal time (animation seconds, relative to REVEAL_START)
+    start: float = 0.0      # reveal time (seconds, relative to REVEAL_START)
     core: int = 0           # canvas item ids
     glows: List[int] = field(default_factory=list)
     settled: bool = False
-    shown: bool = False     # items stay hidden until the phrase's reveal begins
 
 
 class PhraseQueue:
@@ -277,46 +218,34 @@ class PhraseQueue:
         return entry
 
 
-def make_entries(font: tkfont.Font, rtl_visual: bool) -> List[Entry]:
+def build_layout(poly: List[Point], top: float, bottom: float, font: tkfont.Font,
+                 font_px: int, rtl_visual: bool, seed: int) -> List[Phrase]:
+    """Pack complete phrases into the heart, row by row, using measured widths."""
     entries = []
     for lang, text, rtl in LANGUAGES:
         shown = text[::-1] if (rtl and rtl_visual) else text
-        entries.append(Entry(lang, shown, font.measure(shown)))
-    return entries
-
-
-def build_layout(poly: List[Point], fonts: Dict[str, tkfont.Font], big_px: int,
-                 rtl_visual: bool, seed: int) -> List[Phrase]:
-    """Pack complete phrases into the heart, row by row, using measured widths.
-
-    Big type is used wherever it fits; rows where no big phrase fits (lobe tops
-    and the narrow tip) fall back to smaller tiers so the whole heart stays
-    filled with words. Rows are justified edge to edge for a crisp silhouette.
-    """
-    queues = {key: PhraseQueue(make_entries(fonts[key], rtl_visual), seed + i)
-              for i, (key, _) in enumerate(TIERS)}
-    px = {key: max(8, int(big_px * f)) for key, f in TIERS}
+        entries.append(Entry(lang, shown, rtl, font.measure(shown)))
+    queue = PhraseQueue(entries, seed)
 
     ys = [p[1] for p in poly]
     heart_top, heart_bottom = min(ys), max(ys)
-    rows = max(3, int((heart_bottom - heart_top) / (big_px * 1.45)))
+    rows = max(3, int((heart_bottom - heart_top) / (font_px * 1.5)))
     row_h = (heart_bottom - heart_top) / rows
+    half_box = font_px * 0.62
+    margin = font_px * 0.45
+    min_gap, max_gap = font_px * 1.0, font_px * 2.4
     centre_x = sum(p[0] for p in poly) / len(poly)
     centre_y = (heart_top + heart_bottom) / 2
 
     placed: List[Phrase] = []
     depths: List[float] = []
 
-    def pack_row(yc: float, key: str) -> int:
-        """Fill one row with `key` sized type; returns how many phrases were placed."""
-        size, queue = px[key], queues[key]
-        half_box = size * 0.62
-        margin, min_gap, max_gap = size * 0.30, size * 0.95, size * 3.5
+    for k in range(rows):
+        yc = heart_top + (k + 0.5) * row_h
         # A text box must be inside the heart at its top, middle and bottom edges.
         runs = scan_intervals(poly, yc)
         runs = intersect(runs, scan_intervals(poly, yc - half_box))
         runs = intersect(runs, scan_intervals(poly, yc + half_box))
-        count = 0
         for x0, x1 in runs:
             x0, x1 = x0 + margin, x1 - margin
             length = x1 - x0
@@ -346,19 +275,10 @@ def build_layout(poly: List[Point], fonts: Dict[str, tkfont.Font], big_px: int,
                             distance_to_edge(poly, x + e.width, yc))
                 depths.append(depth)
                 angle = math.atan2(mid_x - centre_x, -(yc - centre_y)) % (2 * math.pi)
-                placed.append(Phrase(e.language, e.text, key, x, yc, e.width, (0, 0, 0),
-                                     int(depth / (row_h * 1.1)), angle))
+                placed.append(Phrase(e.text, x, yc, e.width, (0, 0, 0), int(depth / (row_h * 1.1)), angle))
                 x += e.width + gap
-                count += 1
-        return count
 
-    for k in range(rows):
-        yc = heart_top + (k + 0.5) * row_h
-        for key, _ in TIERS:
-            if pack_row(yc, key):
-                break
-
-    # Colour = mostly depth (coral rim -> violet core) with a little top-to-bottom drift.
+    # Colour = mostly depth (red rim -> purple core) with a little top-to-bottom drift.
     max_depth = max(depths) or 1.0
     for p, d in zip(placed, depths):
         vertical = (p.y - heart_top) / (heart_bottom - heart_top)
@@ -377,6 +297,29 @@ def pick_family(root: tk.Tk, candidates: Sequence[str], fallback: str) -> str:
     return next((c for c in candidates if c in available), fallback)
 
 
+class NeonText:
+    """Canvas text with a soft glow made of four dim offset copies."""
+
+    def __init__(self, canvas: tk.Canvas, x: float, y: float, text: str, font: tkfont.Font,
+                 anchor: str, spread: float) -> None:
+        self.canvas = canvas
+        self.glows = [canvas.create_text(x + dx * spread, y + dy * spread, text=text, font=font,
+                                         anchor=anchor, fill=hexc(BG), tags=("glow",))
+                      for dx, dy in GLOW_OFFSETS]
+        self.core = canvas.create_text(x, y, text=text, font=font, anchor=anchor,
+                                       fill=hexc(BG), tags=("core",))
+
+    def set_text(self, text: str) -> None:
+        for item in self.glows + [self.core]:
+            self.canvas.itemconfigure(item, text=text)
+
+    def set_color(self, color: RGB, glow: float = 0.30) -> None:
+        self.canvas.itemconfigure(self.core, fill=hexc(color))
+        g = hexc(lerp(BG, color, glow))
+        for item in self.glows:
+            self.canvas.itemconfigure(item, fill=g)
+
+
 class LoveHeartApp:
     def __init__(self, root: tk.Tk, args: argparse.Namespace) -> None:
         self.root = root
@@ -386,12 +329,11 @@ class LoveHeartApp:
         self.canvas.pack(fill="both", expand=True)
         self.family = pick_family(root, ["Segoe UI", "Noto Sans", "Arial Unicode MS",
                                          "Nirmala UI", "DejaVu Sans", "Helvetica"], "TkDefaultFont")
+        self.title_family = pick_family(root, ["Segoe UI Light", "Georgia", "Palatino Linotype",
+                                               "DejaVu Serif", "Times New Roman"], self.family)
         self.built_size = (0, 0)
         self.resize_job = None
         self.fullscreen = args.fullscreen
-        self.hover: Optional[Phrase] = None
-        self.pulse_now = 0.0
-        self.by_item: Dict[int, Phrase] = {}
 
         root.bind("<Escape>", lambda e: self.request_stop())
         root.bind("<q>", lambda e: self.request_stop())
@@ -400,10 +342,8 @@ class LoveHeartApp:
         root.bind("<f>", lambda e: self.toggle_fullscreen())
         root.protocol("WM_DELETE_WINDOW", self.request_stop)
         self.canvas.bind("<Configure>", self.on_configure)
-        self.canvas.bind("<Motion>", self.on_motion)
-        self.canvas.bind("<Leave>", lambda e: self.set_hover(None))
 
-    # ----- window events ---------------------------------------------------- #
+    # ----- lifecycle -------------------------------------------------------- #
     def request_stop(self) -> None:
         self.stop = True
 
@@ -424,54 +364,8 @@ class LoveHeartApp:
     def rebuild_after_resize(self) -> None:
         self.resize_job = None
         w, h = self.canvas.winfo_width(), self.canvas.winfo_height()
-        if (w, h) != self.built_size and w > 300 and h > 300:
+        if (w, h) != self.built_size and w > 200 and h > 200:
             self.build_scene(instant=True)          # show the finished heart at the new size
-
-    # ----- hover: highlight + language chip --------------------------------- #
-    def on_motion(self, event: tk.Event) -> None:
-        hit = None
-        for item in self.canvas.find_overlapping(event.x - 1, event.y - 1, event.x + 1, event.y + 1):
-            p = self.by_item.get(item)
-            if p is not None and p.settled:
-                hit = p
-        if hit is not self.hover:
-            self.set_hover(hit)
-        if hit is not None:
-            self.place_tip(event.x, event.y)
-
-    def settled_color(self, p: Phrase) -> RGB:
-        mix = 0.5 * self.pulse_now
-        if p is self.hover:
-            mix = max(mix, 0.8)
-        return lerp(p.color, FLASH, mix)
-
-    def set_hover(self, p: Optional[Phrase]) -> None:
-        c = self.canvas
-        old, self.hover = self.hover, p
-        for ph, glow in ((old, GLOW), (p, 0.5)):
-            if ph is not None:
-                c.itemconfigure(ph.core, fill=hexc(self.settled_color(ph)))
-                g = hexc(lerp(BG, ph.color, glow))
-                for item in ph.glows:
-                    c.itemconfigure(item, fill=g)
-        if p is None:
-            for item in self.tip_items:
-                c.itemconfigure(item, state="hidden")
-            return
-        c.itemconfigure(self.tip_text, text=p.language)
-        font = self.fonts["tip"]
-        self.tip_size = (font.measure(p.language) + 24, font.metrics("linespace") + 12)
-        for item in self.tip_items:
-            c.itemconfigure(item, state="normal")
-
-    def place_tip(self, mx: float, my: float) -> None:
-        w, h = self.built_size
-        tw, th = self.tip_size
-        x = min(max(8, mx + 16), w - tw - 8)
-        y = min(max(8, my + 20), h - th - 8)
-        self.canvas.coords(self.tip_bg, *rounded_rect(x, y, x + tw, y + th, 12))
-        self.canvas.coords(self.tip_text, x + tw / 2, y + th / 2)
-        self.canvas.tag_raise("tip")
 
     # ----- scene ------------------------------------------------------------ #
     def build_scene(self, instant: bool) -> None:
@@ -480,23 +374,19 @@ class LoveHeartApp:
         w, h = c.winfo_width(), c.winfo_height()
         self.built_size = (w, h)
         self.cur_scale = 1.0
-        self.hover = None
-        self.pulse_now = 0.0
 
-        # Very soft ambient light behind everything (kept referenced for Tk).
-        self.backdrop = make_backdrop(w, h, self.args.seed)
-        c.create_image(0, 0, image=self.backdrop, anchor="nw")
-
-        # No title or footer: the heart gets almost the whole window.
-        top, bottom = h * 0.035, h * 0.965
-        self.poly = fit_heart(w, top, bottom)
+        top, bottom = h * 0.14, h * 0.90
+        self.poly = fit_heart(w, h, top, bottom)
         heart_h = max(p[1] for p in self.poly) - min(p[1] for p in self.poly)
-        big_px = int(max(14, min(48, heart_h / 29 * 0.86)))
-        spread = max(1.0, big_px / 24)
-        self.fonts = {key: tkfont.Font(family=self.family, size=-max(8, int(big_px * f)), weight="bold")
-                      for key, f in TIERS}
-        self.fonts["tip"] = tkfont.Font(family=self.family, size=-int(max(12, min(17, h * 0.016))),
-                                        weight="bold")
+        font_px = int(max(13, min(44, heart_h / 29 * 1.02)))
+        self.font_px = font_px
+        spread = max(1.0, font_px / 20)
+        self.fonts = {
+            "phrase": tkfont.Font(family=self.family, size=-font_px, weight="bold"),
+            "title": tkfont.Font(family=self.title_family, size=-int(max(24, min(64, h * 0.05)))),
+            "message": tkfont.Font(family=self.title_family, size=-int(max(18, min(40, h * 0.034))),
+                                   slant="italic"),
+        }
 
         # Floating sparkles (background layer).
         rng = random.Random(self.args.seed)
@@ -504,34 +394,34 @@ class LoveHeartApp:
         for _ in range(70):
             r = rng.uniform(0.8, 2.6)
             x, y = rng.uniform(0, w), rng.uniform(0, h)
-            item = c.create_oval(x - r, y - r, x + r, y + r, fill=hexc(BG), outline="", state="hidden")
+            item = c.create_oval(x - r, y - r, x + r, y + r, fill=hexc(BG), outline="")
             self.sparkles.append([item, rng.uniform(8, 26), rng.uniform(0, 6.28),
                                   rng.uniform(0.5, 1.6), rng.choice(GRADIENT)])
 
+        # Soft halo behind the text (revealed together with the phrases).
+        self.halo = []
+        for factor in (1.10, 1.06, 1.03, 1.0):
+            cx, cy = w / 2, (top + bottom) / 2
+            flat = [v for x, y in self.poly for v in (cx + (x - cx) * factor, cy + (y - cy) * factor)]
+            self.halo.append(c.create_polygon(flat, fill=hexc(BG), outline="", tags=("heart", "halo")))
+
+        # Title & final message.
+        self.title = NeonText(c, w / 2, h * 0.07, "", self.fonts["title"], "center", 2)
+        self.message = NeonText(c, w / 2, h * 0.955, FINAL_MESSAGE, self.fonts["message"], "center", 1.5)
+
         # Phrases: glow items first, cores after, so glows never cover text.
-        self.phrases = build_layout(self.poly, self.fonts, big_px,
+        self.phrases = build_layout(self.poly, top, bottom, self.fonts["phrase"], font_px,
                                     self.args.rtl == "visual", self.args.seed)
-        self.by_item = {}
         for p in self.phrases:
             p.glows = [c.create_text(p.x + dx * spread, p.y + dy * spread, text=p.text,
-                                     font=self.fonts[p.font], anchor="w", fill=hexc(BG),
-                                     state="hidden", tags=("heart", "glow")) for dx, dy in GLOW_OFFSETS]
+                                     font=self.fonts["phrase"], anchor="w", fill=hexc(BG),
+                                     tags=("heart", "glow")) for dx, dy in GLOW_OFFSETS]
         for p in self.phrases:
-            p.core = c.create_text(p.x, p.y, text=p.text, font=self.fonts[p.font],
-                                   anchor="w", fill=hexc(BG), state="hidden", tags=("heart", "core"))
+            p.core = c.create_text(p.x, p.y, text=p.text, font=self.fonts["phrase"],
+                                   anchor="w", fill=hexc(BG), tags=("heart",))
             p.settled = False
-            p.shown = False
-            for item in p.glows + [p.core]:
-                self.by_item[item] = p
+        c.tag_raise("glow", "halo")
         c.tag_raise("core")
-
-        # Tooltip chip (hidden until hovering a phrase).
-        self.tip_size = (10.0, 10.0)
-        self.tip_bg = c.create_polygon(rounded_rect(0, 0, 10, 10, 6), smooth=True, fill=hexc(TIP_BG),
-                                       outline=hexc(TIP_EDGE), width=1, state="hidden", tags=("tip",))
-        self.tip_text = c.create_text(0, 0, text="", font=self.fonts["tip"], fill=hexc(FLASH),
-                                      state="hidden", tags=("tip",))
-        self.tip_items = [self.tip_bg, self.tip_text]
 
         # Timeline is kept in "animation seconds"; --speed scales real time into it.
         n = len(self.phrases)
@@ -540,12 +430,12 @@ class LoveHeartApp:
         self.reveal_end = REVEAL_START + REVEAL_DURATION + FADE_IN + SETTLE
         self.first_open = 0
         self.last_pulse_level = -1
-        head_start = (self.reveal_end + 5) / self.args.speed if instant else 0.0
+        self.title_shown = -1
+        head_start = (self.reveal_end + MESSAGE_FADE + 5) / self.args.speed if instant else 0.0
         self.t0 = time.perf_counter() - head_start
 
-    # ----- animation -------------------------------------------------------- #0
-    @staticmethod
-    def phrase_color(age: float, final: RGB) -> Optional[RGB]:
+    # ----- animation -------------------------------------------------------- #
+    def phrase_color(self, age: float, final: RGB) -> Optional[RGB]:
         if age < 0:
             return None
         if age < FADE_IN:
@@ -555,15 +445,10 @@ class LoveHeartApp:
         return final
 
     def set_phrase(self, p: Phrase, color: RGB) -> None:
-        c = self.canvas
-        if not p.shown:
-            p.shown = True
-            for item in p.glows + [p.core]:
-                c.itemconfigure(item, state="normal")
-        c.itemconfigure(p.core, fill=hexc(color))
-        g = hexc(lerp(BG, color, GLOW))
+        self.canvas.itemconfigure(p.core, fill=hexc(color))
+        g = hexc(lerp(BG, color, 0.30))
         for item in p.glows:
-            c.itemconfigure(item, fill=g)
+            self.canvas.itemconfigure(item, fill=g)
 
     @staticmethod
     def pulse(t: float) -> float:
@@ -579,8 +464,16 @@ class LoveHeartApp:
         now = (started - self.t0) * self.args.speed      # animation seconds
         c = self.canvas
 
+        # Title typewriter.
+        shown = min(len(TITLE), int(now / TITLE_CHAR_DELAY))
+        if shown != self.title_shown:
+            self.title_shown = shown
+            self.title.set_text(TITLE[:shown])
+            self.title.set_color((255, 150, 205), 0.28)
+
         # Phrases fade in outside-in.
         rel = now - REVEAL_START
+        progress = clamp01(rel / REVEAL_DURATION)
         phrases = self.phrases
         n = len(phrases)
         i = self.first_open
@@ -598,32 +491,39 @@ class LoveHeartApp:
         while self.first_open < n and phrases[self.first_open].settled:
             self.first_open += 1
 
-        # Heartbeat once the heart is complete.
-        beat_t = now - self.reveal_end - 0.4
+        # Final message, then heartbeat.
+        end = self.reveal_end
+        msg_k = smooth((now - end - 0.2) / MESSAGE_FADE)
+        self.message.set_color(lerp(BG, (255, 170, 215), msg_k), 0.28)
+        beat_t = now - end - 0.2 - MESSAGE_FADE
         pulse = self.pulse(beat_t) if beat_t > 0 else 0.0
-        self.pulse_now = pulse
+
+        # Halo grows with the reveal and flares with each beat.
+        for item, base in zip(self.halo, (0.10, 0.18, 0.30, 0.46)):
+            c.itemconfigure(item, fill=hexc(lerp(BG, HALO, base * progress * (1 + 0.7 * pulse))))
+
         level = int(pulse * 12)
         if level != self.last_pulse_level:
             self.last_pulse_level = level
             for p in phrases:
                 if p.settled:
-                    c.itemconfigure(p.core, fill=hexc(self.settled_color(p)))
+                    c.itemconfigure(p.core, fill=hexc(lerp(p.color, FLASH, 0.5 * pulse)))
         target = 1 + BEAT_SCALE * pulse
         if abs(target - self.cur_scale) > 1e-4:
+            cx, cy = self.canvas.winfo_width() / 2, self.canvas.winfo_height() / 2
             ratio = target / self.cur_scale
-            c.scale("heart", self.built_size[0] / 2, self.built_size[1] / 2, ratio, ratio)
+            c.scale("heart", cx, cy, ratio, ratio)
             self.cur_scale = target
 
         # Sparkles drift upward and twinkle.
-        h = self.built_size[1]
+        h = self.canvas.winfo_height()
         fade_in = clamp01(now / 3.0)
         for item, vy, phase, twinkle, col in self.sparkles:
             c.move(item, math.sin(now * 0.6 + phase) * 0.25, -vy / 60.0)
             if c.coords(item)[1] < -6:
                 c.move(item, 0, h + 12)
             tw = 0.25 + 0.35 * (0.5 + 0.5 * math.sin(now * twinkle * 2 + phase))
-            c.itemconfigure(item, fill=hexc(lerp(BG, col, tw * fade_in)),
-                            state="normal" if fade_in > 0.05 else "hidden")
+            c.itemconfigure(item, fill=hexc(lerp(BG, col, tw * fade_in)))
 
         elapsed_ms = (time.perf_counter() - started) * 1000
         self.root.after(max(1, int(16 - elapsed_ms)), self.tick)
@@ -634,7 +534,7 @@ class LoveHeartApp:
 # --------------------------------------------------------------------------- #
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Love in 20 Languages - a heart made of 'I love you'.")
+    parser = argparse.ArgumentParser(description="Love in 20 Languages - a neon heart made of 'I love you'.")
     parser.add_argument("--speed", type=float, default=1.0, help="animation speed multiplier (default 1.0)")
     parser.add_argument("--seed", type=int, default=7, help="phrase arrangement seed (default 7)")
     parser.add_argument("--fullscreen", action="store_true", help="start fullscreen (F11 toggles)")
@@ -669,8 +569,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     root.title("Love in 20 Languages ♥")
     root.configure(bg=hexc(BG))
     sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-    height = int(sh * 0.92)
-    width = min(int(sw * 0.95), int(height * 1.15))
+    height = int(sh * 0.90)
+    width = min(int(sw * 0.95), int(height * 1.22))
     root.geometry(f"{width}x{height}+{(sw - width) // 2}+{max(0, (sh - height) // 6)}")
     if args.fullscreen:
         root.attributes("-fullscreen", True)

@@ -1,0 +1,4 @@
+﻿# Source videos are kept locally and omitted from version control.
+*.mp4
+*.mov
+*.webm
